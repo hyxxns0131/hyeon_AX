@@ -1,10 +1,13 @@
 import os
+import io
 import streamlit as st
 import requests
+import pandas as pd
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
 
 # ----------------------------------------------------
-# 0. 환경 변수 로드
+# 0. 환경 변수 로드 및 기본 설정
 # ----------------------------------------------------
 load_dotenv()
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
@@ -20,37 +23,119 @@ st.set_page_config(
 if "calc_target" not in st.session_state:
     st.session_state.calc_target = "USD"
 
+# 세분화된 짐 싸기 기본 체크리스트 세션 초기화
+if "categorized_checklist" not in st.session_state:
+    st.session_state.categorized_checklist = {
+        "📄 필수 서류 & 금융": [
+            {"item": "여권 원본 (유효기간 6개월 이상)", "checked": True},
+            {"item": "항공권 E-티켓 & 숙소 예약 바우처", "checked": True},
+            {"item": "해외 결제 카드 (트래블로그/트래블월렛 등)", "checked": True},
+            {"item": "현지 화폐 (소액 현금/동전 지갑)", "checked": False},
+            {"item": "여행자 보험 증명서", "checked": False}
+        ],
+        "👕 의류 & 패션 잡화": [
+            {"item": "일차별 상의 & 하의 (기온 맞춤 코디)", "checked": False},
+            {"item": "속옷 & 양말 (일수 + 여분 1벌)", "checked": False},
+            {"item": "편안한 잠옷 (룸웨어)", "checked": False},
+            {"item": "가벼운 외투 (가디건, 바람막이, 셔츠)", "checked": False},
+            {"item": "편한 운동화 & 슬리퍼", "checked": False},
+            {"item": "선글라스 & 모자", "checked": False}
+        ],
+        "🪥 세면도구 & 스킨케어": [
+            {"item": "칫솔 & 치약 (호텔 미제공 대비)", "checked": False},
+            {"item": "클렌징폼 & 메이크업 리무버", "checked": False},
+            {"item": "스킨, 로션, 수분크림 (기내용 100ml 이하)", "checked": False},
+            {"item": "자외선 차단제 (선크림)", "checked": False},
+            {"item": "샴푸, 트리트먼트, 바디워시 (여행용 키트)", "checked": False},
+            {"item": "립밤 & 핸드크림", "checked": False},
+            {"item": "면도기 & 빗", "checked": False}
+        ],
+        "🔋 전자기기 & 기타 소품": [
+            {"item": "스마트폰 충전기 & 보조배터리 (기내 수하물)", "checked": False},
+            {"item": "국가별 멀티 어댑터 (돼지코 플러그)", "checked": False},
+            {"item": "유심(eSIM) / 포켓 와이파이", "checked": False},
+            {"item": "이어폰 / 노이즈캔슬링 헤드폰", "checked": False},
+            {"item": "비상 상비약 (소화제, 두통약, 밴드, 지사제)", "checked": False},
+            {"item": "물티슈 & 휴대용 티슈", "checked": False},
+            {"item": "접이식 나뭇잎 우산 (양산 겸용)", "checked": False}
+        ]
+    }
+
 
 # ----------------------------------------------------
-# 1. 국내 주요 명소 한 줄 소개 딕셔너리
+# 1. 도도항공 탑승권 이미지(PNG) 동적 생성 함수
 # ----------------------------------------------------
-DOMESTIC_SPOT_DESCRIPTIONS = {
-    "강남역": "최신 트렌드와 쇼핑, 활기찬 야경과 맛집이 24시간 잠들지 않는 서울의 대표 번화가입니다.",
-    "선릉과정릉": "도심 속 푸른 숲길을 걸으며 조선 왕릉의 고즈넉한 정취와 휴식을 즐길 수 있는 유네스코 세계문화유산입니다.",
-    "경복궁": "조선 왕조 제일의 법궁으로, 웅장한 근정전과 연못 위의 경회루가 사계절 내내 아름다운 역사의 중심지입니다.",
-    "N서울타워": "남산 정상에서 360도 파노라마로 서울 전경과 낭만적인 석양, 화려한 야경을 한눈에 담을 수 있는 서울의 랜드마크입니다.",
-    "롯데월드타워": "국내 최고층 전망대 서울스카이와 아쿠아리움, 쇼핑몰이 한곳에 모인 럭셔리 복합 문화 명소입니다.",
-    "북촌한옥마을": "실제 주민들이 살아가는 조선 시대 양반 가옥 골목으로, 고풍스러운 한옥 처마와 남산 뷰가 어우러진 사진 명소입니다.",
-    "동대문디자인플라자(DDP)": "자하 하디드의 유려한 곡선 건축물로 전시, 패션쇼, 미래지향적 야경 산책을 만끽할 수 있는 디자인 성지입니다.",
-    "명동성당": "한국 천주교의 상징이자 붉은 벽돌의 웅장한 고딕 양식 건축미를 감상할 수 있는 도심 속 평화로운 성소입니다.",
-    "창덕궁": "자연 지형을 그대로 살린 한국 전통 정원의 정수 '후원(비원)'을 품은 가장 한국적인 궁궐입니다.",
-    "여의도 한강공원": "시원한 강바람을 맞으며 피크닉과 한강 라면, 자전거 라이딩과 유람선을 즐기기 가장 좋은 쉼터입니다.",
-    "국립중앙박물관": "반가사유상을 비롯한 수만 점의 국보급 유물과 아름다운 야외 거울못 정원을 무료로 둘러볼 수 있는 문화 명소입니다."
-}
+def generate_boarding_pass_image(passenger, from_dest, to_dest, duration, motto):
+    width, height = 750, 320
+    img = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+
+    card_box = [10, 10, width - 10, height - 10]
+    draw.rounded_rectangle(card_box, radius=24, fill="#ffffff", outline="#0096c7", width=6)
+
+    draw.rounded_rectangle([12, 12, width - 12, 75], radius=20, fill="#e0f7fa")
+    draw.rectangle([12, 50, width - 12, 75], fill="#e0f7fa")
+
+    font_bold = None
+    font_regular = None
+    font_large = None
+    possible_fonts = ["malgunbd.ttf", "malgun.ttf", "AppleGothic.ttf", "NanumGothicBold.ttf", "arialbd.ttf"]
+    for pf in possible_fonts:
+        try:
+            font_bold = ImageFont.truetype(pf, 20)
+            font_regular = ImageFont.truetype(pf, 16)
+            font_large = ImageFont.truetype(pf, 24)
+            break
+        except Exception:
+            continue
+
+    if not font_bold:
+        font_bold = font_regular = font_large = ImageFont.load_default()
+
+    draw.text((30, 24), "DODO AIRLINES BOARDING PASS", fill="#0077b6", font=font_large)
+    draw.text((580, 28), "DAL - 2026", fill="#0096c7", font=font_bold)
+
+    for x in range(30, width - 30, 14):
+        draw.line([(x, 88), (x + 8, 88)], fill="#90e0ef", width=3)
+
+    y_start = 108
+    line_spacing = 38
+
+    draw.text((35, y_start), "PASSENGER", fill="#888888", font=font_regular)
+    draw.text((170, y_start), f":  {passenger}", fill="#222222", font=font_bold)
+
+    draw.text((35, y_start + line_spacing), "ROUTE", fill="#888888", font=font_regular)
+    draw.text((170, y_start + line_spacing), f":  {from_dest}  ==>  {to_dest}", fill="#0077b6", font=font_bold)
+
+    draw.text((35, y_start + line_spacing * 2), "DURATION", fill="#888888", font=font_regular)
+    draw.text((170, y_start + line_spacing * 2), f":  {duration}", fill="#222222", font=font_bold)
+
+    draw.text((35, y_start + line_spacing * 3), "MOTTO", fill="#888888", font=font_regular)
+    draw.text((170, y_start + line_spacing * 3), f':  "{motto}"', fill="#e76f51", font=font_bold)
+
+    draw.line([(550, 95), (550, height - 25)], fill="#b2bec3", width=2)
+    barcode_x = 575
+    barcode_y = 120
+    for i in range(16):
+        w_line = 3 if i % 3 == 0 else 1
+        draw.rectangle([barcode_x + (i * 8), barcode_y, barcode_x + (i * 8) + w_line, barcode_y + 110], fill="#2d3436")
+    draw.text((575, barcode_y + 118), "BOARDING OK", fill="#0077b6", font=font_regular)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 # ----------------------------------------------------
-# 2. 해외 여행지 데이터베이스 (도시별 매력 설명 desc 추가)
+# 2. 해외 여행지 데이터베이스
 # ----------------------------------------------------
 GLOBAL_DESTINATIONS = {
     "일본 🇯🇵": {
-        "currency": "JPY",
-        "currency_symbol": "¥",
-        "flight_base": 350000,
+        "currency": "JPY", "currency_symbol": "¥", "flight_base": 350000,
         "cities": {
             "도쿄 (Tokyo)": {
                 "lat": 35.6762, "lon": 139.6503,
-                "desc": "초현대적인 마천루와 애니메이션·패션의 성지이면서, 골목마다 에도 시대의 전통과 다채로운 미식이 공존하는 아시아 최대 메가시티입니다.",
+                "desc": "초현대적인 마천루와 패션의 성지이자 에도 시대의 전통과 다채로운 미식이 공존하는 아시아 최대 메가시티입니다.",
                 "spots": ["시부야 스크램블 스퀘어 & 하치코", "센소지 & 아사쿠사 거리", "도쿄 타워 & 롯폰기 힐즈", "신주쿠 교엔 & 오모이데요코초"],
                 "restaurants": [
                     {"name": "이치란 라멘 시부야점", "cat": "돈코츠 라멘", "desc": "독서실 칸막이에서 즐기는 커스텀 돈코츠 라멘", "url": "https://www.google.com/maps/search/Ichiran+Shibuya"},
@@ -60,7 +145,7 @@ GLOBAL_DESTINATIONS = {
             },
             "오사카 (Osaka)": {
                 "lat": 34.6937, "lon": 135.5023,
-                "desc": "'먹다가 망한다'는 말이 있을 정도로 식도락 문화가 발달한 활기찬 항구 도시로, 화려한 네온사인과 친근한 매력이 넘치는 여행지입니다.",
+                "desc": "'먹다가 망한다'는 말이 있을 정도로 식도락 문화가 발달한 활기찬 항구 도시로 화려한 네온사인이 매력적입니다.",
                 "spots": ["도톤보리 글리코상", "오사카성 천수각", "유니버설 스튜디오 재팬 (USJ)", "우메다 공중정원 전망대"],
                 "restaurants": [
                     {"name": "쿠시카츠 다루마 도톤보리", "cat": "꼬치 튀김", "desc": "바삭하고 얇은 튀김옷의 원조 쿠시카츠 전문점", "url": "https://www.google.com/maps/search/Kushikatsu+Daruma+Dotonbori"},
@@ -70,17 +155,17 @@ GLOBAL_DESTINATIONS = {
             },
             "후쿠오카 (Fukuoka)": {
                 "lat": 33.5904, "lon": 130.4017,
-                "desc": "한국에서 가장 가까운 일본 규슈의 관문으로, 진한 돈코츠 라멘과 밤거리의 낭만적인 포장마차(야타이), 아기자기한 쇼핑이 매력적인 도시입니다.",
+                "desc": "한국에서 가장 가까운 일본 규슈의 관문으로, 진한 돈코츠 라멘과 밤거리의 포장마차(야타이)가 낭만적입니다.",
                 "spots": ["하카타 캐널시티", "오호리 공원 & 후쿠오카 성터", "모모치 해변 & 후쿠오카 타워", "나카스 포장마차(야타이) 거리"],
                 "restaurants": [
                     {"name": "신신라멘 하카타 텐진", "cat": "하카타 돈코츠", "desc": "잡내 없이 진하고 구수한 하카타 3대 라멘", "url": "https://www.google.com/maps/search/Hakata+Shin-Shin+Tenjin"},
                     {"name": "키와미야 함바그 하카타점", "cat": "철판 함바그", "desc": "달궈진 스톤에 직접 구워먹는 육즙 가득 소고기 함바그", "url": "https://www.google.com/maps/search/Kiwamiya+Hakata"},
-                    {"name": "원조 하카타 멘타이쥬", "cat": "명란 덮밥", "desc": "특제 다시마 다시 소스를 곁들인 후쿠오카 최고급 명란 요리", "url": "https://www.google.com/maps/search/Ganso+Hakata+Mentaiju"}
+                    {"name": "원조 하카타 멘타이쥬", "cat": "명란 덮밥", "desc": "특제 다시마 다시 소스를 곁들인 최고급 명란 요리", "url": "https://www.google.com/maps/search/Ganso+Hakata+Mentaiju"}
                 ]
             },
             "교토 (Kyoto)": {
                 "lat": 35.0116, "lon": 135.7681,
-                "desc": "천년 동안 일본의 수도였던 곳으로, 수천 개의 사찰과 붉은 신사 기둥, 울창한 대나무 숲길이 고즈넉한 일본의 고전미를 전해줍니다.",
+                "desc": "천년 동안 일본의 수도였던 곳으로, 수천 개의 사찰과 붉은 신사 기둥, 대나무 숲길이 고즈넉함을 전합니다.",
                 "spots": ["후시미 이나리 신사(천개의 토리이)", "기요미즈데라(청수사)", "아라시야마 대나무숲(치쿠린)", "킨카쿠지(금각사)"],
                 "restaurants": [
                     {"name": "히노데 우동", "cat": "카레 우동", "desc": "철학의 길 근처에서 즐기는 깊고 매콤달콤한 명품 카레우동", "url": "https://www.google.com/maps/search/Hinode+Udon+Kyoto"},
@@ -91,13 +176,11 @@ GLOBAL_DESTINATIONS = {
         }
     },
     "영국 🇬🇧": {
-        "currency": "GBP",
-        "currency_symbol": "£",
-        "flight_base": 1300000,
+        "currency": "GBP", "currency_symbol": "£", "flight_base": 1300000,
         "cities": {
             "런던 (London)": {
                 "lat": 51.5074, "lon": -0.1278,
-                "desc": "웅장한 고딕 건축의 빅벤부터 웨스트엔드 뮤지컬, 세계적인 무료 박물관들이 즐비한 세계 문화와 예술의 수도입니다.",
+                "desc": "빅벤부터 웨스트엔드 뮤지컬, 세계적인 무료 박물관들이 즐비한 세계 문화와 예술의 수도입니다.",
                 "spots": ["빅벤 & 국회의사당", "타워 브리지 & 런던탑", "대영박물관 (영국박물관)", "버킹엄 궁전 근위병 교대식"],
                 "restaurants": [
                     {"name": "Poppie's Fish & Chips", "cat": "피시 앤 칩스", "desc": "바삭하고 담백한 대구살을 튀겨낸 영국 대표 음식", "url": "https://www.google.com/maps/search/Poppies+Fish+and+Chips+Soho"},
@@ -107,17 +190,17 @@ GLOBAL_DESTINATIONS = {
             },
             "케임브리지 (Cambridge)": {
                 "lat": 52.2053, "lon": 0.1218,
-                "desc": "뉴턴과 튜링의 발자취가 서린 유서 깊은 대학 도시로, 캠강을 따라 나룻배를 타는 낭만적인 펀팅(Punting) 투어가 백미입니다.",
+                "desc": "뉴턴과 튜링의 발자취가 서린 유서 깊은 대학 도시로, 캠강 나룻배를 타는 낭만적인 펀팅 투어가 백미입니다.",
                 "spots": ["킹스 칼리지 & 예배당", "캠강 펀팅(Punting) 보트 투어", "수학의 다리(퀸즈 칼리지)", "피츠윌리엄 박물관 & 시내 마켓"],
                 "restaurants": [
                     {"name": "Fitzbillies (피츠빌리스)", "cat": "첼시 번 & 티룸", "desc": "1920년부터 사랑받아 온 달콤하고 쫀득한 원조 첼시 번 명소", "url": "https://www.google.com/maps/search/Fitzbillies+Cambridge"},
-                    {"name": "The Eagle (디 이글)", "cat": "전통 영국 펍", "desc": "1667년 개업, DNA 이중나선 발견 선언과 역사적 RAF 낙서가 남은 펍", "url": "https://www.google.com/maps/search/The+Eagle+Cambridge"},
+                    {"name": "The Eagle (디 이글)", "cat": "전통 영국 펍", "desc": "1667년 개업, DNA 이중나선 발견 선언과 역사적 낙서가 남은 펍", "url": "https://www.google.com/maps/search/The+Eagle+Cambridge"},
                     {"name": "Aroma Cafe & Kitchen", "cat": "브런치 & 카페", "desc": "캠강 산책 후 즐기기 좋은 정갈한 잉글리시 브런치와 커피", "url": "https://www.google.com/maps/search/Aroma+Cafe+Cambridge"}
                 ]
             },
             "에든버러 (Edinburgh)": {
                 "lat": 55.9533, "lon": -3.1883,
-                "desc": "절벽 위에 우뚝 솟은 고성과 중세풍 화강암 거리가 마치 판타지 소설 속으로 들어온 듯 신비롭고 고풍스러운 스코틀랜드의 심장입니다.",
+                "desc": "절벽 위에 솟은 고성과 중세풍 화강암 거리가 판타지 소설 속으로 들어온 듯 신비로운 스코틀랜드의 심장입니다.",
                 "spots": ["에든버러 성", "로열 마일 거리", "칼튼 힐 전망대", "아서스 시트(사자 언덕)"],
                 "restaurants": [
                     {"name": "The Witchery by the Castle", "cat": "스코티시 파인다이닝", "desc": "고딕 양식의 신비로운 인테리어와 스코틀랜드 전통 요리", "url": "https://www.google.com/maps/search/The+Witchery+by+the+Castle"},
@@ -127,7 +210,7 @@ GLOBAL_DESTINATIONS = {
             },
             "맨체스터 (Manchester)": {
                 "lat": 53.4808, "lon": -2.2426,
-                "desc": "세계 축구 팬들의 성지이자 산업혁명의 발상지로, 붉은 벽돌 창고를 개조한 힙한 펍과 인디 음악 씬이 살아 숨 쉬는 활력 넘치는 도시입니다.",
+                "desc": "세계 축구 팬들의 성지이자 산업혁명의 발상지로, 힙한 펍과 인디 음악 씬이 활력 넘치는 도시입니다.",
                 "spots": ["올드 트래포드(맨유 홈구장)", "에티하드 스타디움(맨시티 구장)", "존 라이랜즈 도서관", "국립 축구 박물관"],
                 "restaurants": [
                     {"name": "Hawksmoor Manchester", "cat": "영국식 스테이크", "desc": "빅토리아 시대 법원을 개조한 최고급 영국 스테이크하우스", "url": "https://www.google.com/maps/search/Hawksmoor+Manchester"},
@@ -138,13 +221,11 @@ GLOBAL_DESTINATIONS = {
         }
     },
     "중국 🇨🇳": {
-        "currency": "CNY",
-        "currency_symbol": "¥",
-        "flight_base": 360000,
+        "currency": "CNY", "currency_symbol": "¥", "flight_base": 360000,
         "cities": {
             "베이징 (Beijing)": {
                 "lat": 39.9042, "lon": 116.4074,
-                "desc": "자금성과 만리장성 등 대륙의 압도적인 황실 역사 유적과 현대 예술 지구가 공존하는 중국 3천 년 역사의 중심지입니다.",
+                "desc": "자금성과 만리장성 등 대륙의 웅장한 역사 유적과 현대 예술 지구가 공존하는 중국 3천 년 역사의 중심지입니다.",
                 "spots": ["자금성(고궁박물원)", "만리장성(팔달령)", "이화원(황실 정원)", "천안문 광장 & 싼리툰"],
                 "restaurants": [
                     {"name": "취안쥐더(전취덕) 베이징덕 본점", "cat": "베이징 카오야", "desc": "150년 전통 바삭한 껍질과 촉촉한 속살의 북경오리", "url": "https://www.google.com/maps/search/Quanjude+Beijing"},
@@ -154,7 +235,7 @@ GLOBAL_DESTINATIONS = {
             },
             "상하이 (Shanghai)": {
                 "lat": 31.2304, "lon": 121.4737,
-                "desc": "황푸강을 사이에 두고 유럽풍 고전 건축의 와이탄과 미래도시 같은 화려한 스카이라인이 드라마틱하게 마주하는 트렌디한 국제도시입니다.",
+                "desc": "고전 건축의 와이탄과 미래도시 같은 화려한 스카이라인이 드라마틱하게 마주하는 트렌디한 국제도시입니다.",
                 "spots": ["와이탄 유럽풍 거리 & 야경", "동방명주 & 상하이 타워", "예원(전통 명나라 정원)", "신천지 카페거리 & 대한민국 임시정부 청사"],
                 "restaurants": [
                     {"name": "자자탕바오(Jia Jia Tang Bao)", "cat": "샤오롱바오", "desc": "진한 게살 육즙이 터지는 상하이 최고 인기 딤섬", "url": "https://www.google.com/maps/search/Jia+Jia+Tang+Bao+Shanghai"},
@@ -164,7 +245,7 @@ GLOBAL_DESTINATIONS = {
             },
             "칭다오 (Qingdao)": {
                 "lat": 36.0671, "lon": 120.3826,
-                "desc": "붉은 지붕과 푸른 바다가 어우러져 '동양의 작은 유럽'이라 불리며, 신선한 해산물 바지락 볶음과 시원한 칭다오 생맥주를 즐기기 완벽한 휴양지입니다.",
+                "desc": "붉은 지붕과 푸른 바다가 어우러진 휴양지로, 신선한 바지락 볶음과 칭다오 생맥주 한 잔의 여유를 즐기기 좋습니다.",
                 "spots": ["칭다오 맥주 박물관", "잔교(팔각정 바다 부두)", "5.4 광장 & 야경 분수", "신호산 공원(붉은 지붕 독일풍 전경)"],
                 "restaurants": [
                     {"name": "해주처(바지락 요리)", "cat": "해산물 포차", "desc": "매콤한 바지락 볶음과 갓 뽑아낸 생 칭다오 맥주 한 잔", "url": "https://www.google.com/maps/search/Qingdao+Seafood+Clams"},
@@ -175,13 +256,11 @@ GLOBAL_DESTINATIONS = {
         }
     },
     "프랑스 🇫🇷": {
-        "currency": "EUR",
-        "currency_symbol": "€",
-        "flight_base": 1250000,
+        "currency": "EUR", "currency_symbol": "€", "flight_base": 1250000,
         "cities": {
             "파리 (Paris)": {
                 "lat": 48.8566, "lon": 2.3522,
-                "desc": "센강을 따라 에펠탑과 루브르가 펼쳐지는 낭만의 도시로, 미식과 예술, 패션의 향기가 가득해 전 세계 여행자들의 버킷리스트로 꼽힙니다.",
+                "desc": "에펠탑과 루브르가 펼쳐지는 낭만의 도시로 미식과 예술의 향기가 가득한 여행자들의 버킷리스트입니다.",
                 "spots": ["에펠탑 & 샹드마르스 공원", "루브르 박물관", "몽마르트르 언덕 & 사크레쾨르 대성당", "오르세 미술관 & 센강 유람선"],
                 "restaurants": [
                     {"name": "Le Relais de l'Entrecôte", "cat": "스테이크", "desc": "특제 소스를 얹은 바베큐 스테이크와 무한 감자튀김", "url": "https://www.google.com/maps/search/Le+Relais+de+l'Entrecote+Paris"},
@@ -191,7 +270,7 @@ GLOBAL_DESTINATIONS = {
             },
             "니스 (Nice)": {
                 "lat": 43.7102, "lon": 7.2620,
-                "desc": "눈부신 에메랄드빛 코트다쥐르 지중해 바다와 붉은 구시가지 골목, 온화한 햇살이 일 년 내내 반겨주는 프랑스 남부 최고의 휴양 도시입니다.",
+                "desc": "눈부신 에메랄드빛 지중해 바다와 붉은 구시가지 골목, 따스한 햇살이 일 년 내내 반겨주는 남부 휴양지입니다.",
                 "spots": ["프롬나드 데 장글레(영국인 산책로)", "캐슬 힐(니스 파노라마 전망대)", "니스 구시가지(살레야 광장 시장)", "마티스 미술관"],
                 "restaurants": [
                     {"name": "Chez René Socca", "cat": "니스 전통 간식", "desc": "병아리콩 전(소카)과 다양한 지중해 핑거푸드", "url": "https://www.google.com/maps/search/Chez+Rene+Socca+Nice"},
@@ -201,7 +280,7 @@ GLOBAL_DESTINATIONS = {
             },
             "리옹 (Lyon)": {
                 "lat": 45.7640, "lon": 4.8357,
-                "desc": "프랑스 미식의 수도로 불리며, 유네스코 구시가지 골목 비외 리옹과 전통 식당 '부숑(Bouchon)'에서 프랑스 진짜 손맛을 경험할 수 있습니다.",
+                "desc": "프랑스 미식의 수도로 유네스코 구시가지 골목 비외 리옹과 전통 부숑 식당에서 참맛을 느낄 수 있습니다.",
                 "spots": ["푸르비에르 노트르담 대성당", "리옹 구시가지(비외 리옹)", "벨쿠르 광장", "폴 보퀴즈 전통 미식 시장"],
                 "restaurants": [
                     {"name": "Le Bouchon des Filles", "cat": "부숑 전통식", "desc": "미식의 도시 리옹 정통 가정식 코스 요리", "url": "https://www.google.com/maps/search/Le+Bouchon+des+Filles+Lyon"},
@@ -212,13 +291,11 @@ GLOBAL_DESTINATIONS = {
         }
     },
     "베트남 🇻🇳": {
-        "currency": "VND",
-        "currency_symbol": "₫",
-        "flight_base": 380000,
+        "currency": "VND", "currency_symbol": "₫", "flight_base": 380000,
         "cities": {
             "다낭 (Da Nang)": {
                 "lat": 16.0544, "lon": 108.2022,
-                "desc": "끝없이 펼쳐진 미케 비치와 가성비 좋은 고급 풀빌라, 신비로운 바나힐과 유등 띄우는 호이안 야경까지 완벽한 힐링 휴양지입니다.",
+                "desc": "끝없이 펼쳐진 미케 비치와 가성비 고급 풀빌라, 바나힐과 유등 띄우는 호이안 야경까지 완벽한 힐링 휴양지입니다.",
                 "spots": ["미케 비치 해변", "바나힐 골든 브릿지", "오행산 (마블 마운틴)", "호이안 올드타운 야경 투어"],
                 "restaurants": [
                     {"name": "냐벱 스아 (Nha Bep Xua)", "cat": "베트남 가정식", "desc": "반쎄오, 분짜, 모닝글로리가 맛있는 깔끔한 식당", "url": "https://www.google.com/maps/search/Nha+Bep+Xua+Da+Nang"},
@@ -228,71 +305,67 @@ GLOBAL_DESTINATIONS = {
             },
             "하노이 (Hanoi)": {
                 "lat": 21.0285, "lon": 105.8542,
-                "desc": "호안끼엠 호수 주변의 활기찬 오토바이 물결과 기찻길 마을, 달콤한 에그 커피와 정통 쌀국수가 여행자를 매료시키는 베트남의 수도입니다.",
+                "desc": "호안끼엠 호수 주변의 오토바이 물결과 기찻길 마을, 달콤한 에그 커피와 쌀국수가 여행자를 유혹하는 수도입니다.",
                 "spots": ["호안끼엠 호수 & 응옥선 사당", "하노이 기찻길 마을", "성 요셉 대성당", "하롱베이 크루즈 당일/1박 투어"],
                 "restaurants": [
-                    {"name": "분짜 흐엉리엔(오바마 분짜)", "cat": "숯불 분짜", "desc": "오바마 대통령이 방문해 극찬한 숯불 돼지고기 쌀국수", "url": "https://www.google.com/maps/search/Bun+Cha+Huong+Lien+Hanoi"},
+                    {"name": "분짜 흐엉리엔(오바마 분짜)", "cat": "숯불 분짜", "desc": "오바마 대통령이 극찬한 숯불 돼지고기 쌀국수", "url": "https://www.google.com/maps/search/Bun+Cha+Huong+Lien+Hanoi"},
                     {"name": "포텐 리꿕수(Pho 10)", "cat": "소고기 쌀국수", "desc": "미쉐린 빕구르망에 선정된 깊은 소고기 육수 쌀국수", "url": "https://www.google.com/maps/search/Pho+10+Ly+Quoc+Su+Hanoi"},
                     {"name": "카페 지앙(Cafe Giang)", "cat": "원조 에그 커피", "desc": "1946년부터 이어져 온 부드럽고 달콤한 커스터드 에그커피", "url": "https://www.google.com/maps/search/Cafe+Giang+Hanoi"}
                 ]
             },
             "호치민 (Ho Chi Minh)": {
                 "lat": 10.8231, "lon": 106.6297,
-                "desc": "프랑스 식민지 시절의 우아한 건축물과 현대적인 루프탑 바, 카페 아파트먼트 등 젊고 역동적인 에너지가 넘치는 베트남의 경제 중심지입니다.",
+                "desc": "프랑스 식민지 시절의 우아한 건축물과 현대적인 루프탑 바 등 젊고 역동적인 에너지가 넘치는 경제 중심지입니다.",
                 "spots": ["노트르담 대성당 & 중앙 우체국", "통일궁(독립궁)", "벤탄 시장 & 카페 아파트먼트", "사이공 스카이덱(비텍스코)"],
                 "restaurants": [
                     {"name": "꽌넴(Quan Nem)", "cat": "게살 넴 & 분짜", "desc": "CNN에 소개된 바삭한 통게살 스프링롤 넴 맛집", "url": "https://www.google.com/maps/search/Quan+Nem+Ho+Chi+Minh"},
-                    {"name": "피자 4피스(Pizza 4P's)", "cat": "화덕 피자 & 부라타 치즈", "desc": "수제 부라타 치즈와 퓨전 화덕피자로 유명한 베트남 최고 레스토랑", "url": "https://www.google.com/maps/search/Pizza+4Ps+Ben+Thanh"},
+                    {"name": "피자 4피스(Pizza 4P's)", "cat": "화덕 피자 & 부라타 치즈", "desc": "수제 부라타 치즈와 퓨전 화덕피자로 유명한 최고 레스토랑", "url": "https://www.google.com/maps/search/Pizza+4Ps+Ben+Thanh"},
                     {"name": "반미 홍호아(Banh Mi Hong Hoa)", "cat": "바삭 반미", "desc": "갓 구운 바게트에 고기와 파테를 듬뿍 넣은 국민 반미", "url": "https://www.google.com/maps/search/Banh+Mi+Hong+Hoa+Ho+Chi+Minh"}
                 ]
             }
         }
     },
     "미국 🇺🇸": {
-        "currency": "USD",
-        "currency_symbol": "$",
-        "flight_base": 1450000,
+        "currency": "USD", "currency_symbol": "$", "flight_base": 1450000,
         "cities": {
             "뉴욕 (New York)": {
                 "lat": 40.7128, "lon": -74.0060,
-                "desc": "타임스퀘어의 번쩍이는 전광판, 브로드웨이 뮤지컬, 센트럴 파크와 미술관들이 뿜어내는 잠들지 않는 전 세계 문화와 트렌드의 심장입니다.",
+                "desc": "타임스퀘어 전광판, 브로드웨이 뮤지컬, 센트럴 파크가 뿜어내는 잠들지 않는 전 세계 문화의 심장입니다.",
                 "spots": ["타임스퀘어 & 브로드웨이", "센트럴 파크 산책", "자유의 여신상 페리", "엠파이어 스테이트 빌딩 & 록펠러 탑"],
                 "restaurants": [
-                    {"name": "Peter Luger Steak House", "cat": "드라이에이징 스테이크", "desc": "브루클린에서 이어져 온 백년 전통 포터하우스 스테이크", "url": "https://www.google.com/maps/search/Peter+Luger+Steak+House+Brooklyn"},
+                    {"name": "Peter Luger Steak House", "cat": "드라이에이징 스테이크", "desc": "브루클린 백년 전통 포터하우스 스테이크", "url": "https://www.google.com/maps/search/Peter+Luger+Steak+House+Brooklyn"},
                     {"name": "Joe's Pizza", "cat": "뉴욕 조각 피자", "desc": "그리니치 빌리지의 클래식 바삭 치즈 슬라이스 피자", "url": "https://www.google.com/maps/search/Joes+Pizza+Carmine+St"},
                     {"name": "Katz's Delicatessen", "cat": "파스트라미 샌드위치", "desc": "훈제 소고기를 아낌없이 채워 넣은 뉴욕 소울 푸드", "url": "https://www.google.com/maps/search/Katzs+Delicatessen"}
                 ]
             },
             "로스앤젤레스 (Los Angeles)": {
                 "lat": 34.0522, "lon": -118.2437,
-                "desc": "눈부신 캘리포니아 햇살과 산타모니카 해변, 할리우드 영화 산업의 꿈과 유니버설 스튜디오의 즐거움이 가득한 서부 최대의 엔터테인먼트 도시입니다.",
+                "desc": "눈부신 햇살과 산타모니카 해변, 할리우드 영화 산업의 꿈이 가득한 서부 최대의 엔터테인먼트 도시입니다.",
                 "spots": ["할리우드 명예의 거리 & 사인", "산타모니카 피어 해변", "그리피스 천문대 야경", "유니버설 스튜디오 할리우드"],
                 "restaurants": [
-                    {"name": "인앤아웃 버거 할리우드", "cat": "캘리포니아 버거", "desc": "신선한 패티와 애니멀 스타일 감자튀김의 서부 대표 버거", "url": "https://www.google.com/maps/search/In-N-Out+Burger+Sunset+Blvd"},
+                    {"name": "인앤아웃 버거 할리우드", "cat": "캘리포니아 버거", "desc": "신선한 패티와 애니멀 스타일 감자튀김의 대표 버거", "url": "https://www.google.com/maps/search/In-N-Out+Burger+Sunset+Blvd"},
                     {"name": "보테가 루이(Bottega Louie)", "cat": "이탈리안 & 디저트", "desc": "다운타운 명물 대리석 인테리어와 화려한 마카롱 타르트", "url": "https://www.google.com/maps/search/Bottega+Louie+Los+Angeles"},
-                    {"name": "핑크스 핫도그(Pink's Hot Dogs)", "cat": "클래식 칠리독", "desc": "1939년부터 할리우드 스타들이 즐겨 찾던 칠리 치즈 핫도그", "url": "https://www.google.com/maps/search/Pinks+Hot+Dogs+LA"}
+                    {"name": "핑크스 핫도그(Pink's Hot Dogs)", "cat": "클래식 칠리독", "desc": "1939년부터 할리우드 스타들이 찾던 칠리 치즈 핫도그", "url": "https://www.google.com/maps/search/Pinks+Hot+Dogs+LA"}
                 ]
             },
             "샌프란시스코 (San Francisco)": {
                 "lat": 37.7749, "lon": -122.4194,
-                "desc": "붉은 금문교와 언덕길을 오르는 클래식 케이블카, 피어 39의 물개들과 신선한 사워도우 조개스프가 낭만을 더하는 항구 도시입니다.",
+                "desc": "붉은 금문교와 언덕길을 오르는 클래식 케이블카, 피어 39의 물개들이 낭만을 더하는 항구 도시입니다.",
                 "spots": ["금문교(골든게이트 브리지)", "피셔맨스 워프 & 피어 39 바다사자", "롬바드 꽃길 거리", "알카트라즈 섬 감옥 투어"],
                 "restaurants": [
-                    {"name": "보딘 베이커리(Boudin Bakery)", "cat": "클램 차우더", "desc": "새콤한 사워도우 브레드 볼에 담아주는 진한 조개 스프", "url": "https://www.google.com/maps/search/Boudin+Bakery+Fishermans+Wharf"},
+                    {"name": "보딘 베이커리(Boudin Bakery)", "cat": "클램 차우더", "desc": "사워도우 브레드 볼에 담아주는 진한 조개 스프", "url": "https://www.google.com/maps/search/Boudin+Bakery+Fishermans+Wharf"},
                     {"name": "슈퍼두퍼 버거 유니온스퀘어", "cat": "오가닉 수제버거", "desc": "갈릭 프라이와 달콤한 밀크셰이크가 일품인 샌프란 명물", "url": "https://www.google.com/maps/search/Super+Duper+Burgers+Union+Square"},
-                    {"name": "타르틴 베이커리(Tartine Bakery)", "cat": "장인 크루아상", "desc": "미국 3대 베이커리로 꼽히는 향긋한 컨트리 브레드와 페이스트리", "url": "https://www.google.com/maps/search/Tartine+Bakery+San+Francisco"}
+                    {"name": "타르틴 베이커리(Tartine Bakery)", "cat": "장인 크루아상", "desc": "미국 3대 베이커리로 꼽히는 향긋한 컨트리 브레드", "url": "https://www.google.com/maps/search/Tartine+Bakery+San+Francisco"}
                 ]
             }
         }
     },
     "스위스 🇨🇭": {
-        "currency": "CHF",
-        "currency_symbol": "CHF",
-        "flight_base": 1400000,
+        "currency": "CHF", "currency_symbol": "CHF", "flight_base": 1400000,
         "cities": {
             "인터라켄 (Interlaken)": {
                 "lat": 46.6863, "lon": 7.8632,
-                "desc": "알프스의 두 호수 사이에 자리 잡은 천혜의 마을로, 융프라우요흐와 그린델발트로 향하는 산악 액티비티의 베이스캠프입니다.",
+                "desc": "알프스의 두 호수 사이에 자리 잡은 천혜의 마을로, 융프라우요흐로 향하는 산악 액티비티의 본산입니다.",
                 "spots": ["융프라우요흐 유럽의 지붕", "그린델발트 피르스트 액티비티", "하더쿨름 전망대", "브리엔츠 호수 유람선"],
                 "restaurants": [
                     {"name": "Restaurant Taverne", "cat": "치즈 퐁듀 & 뢰스티", "desc": "스위스 전통 알프스 치즈 퐁듀와 바삭한 감자 뢰스티", "url": "https://www.google.com/maps/search/Restaurant+Taverne+Interlaken"},
@@ -302,44 +375,42 @@ GLOBAL_DESTINATIONS = {
             },
             "취리히 (Zurich)": {
                 "lat": 47.3769, "lon": 8.5417,
-                "desc": "청정한 호수와 리마트강을 끼고 있는 스위스 최대 도시로, 세계 최고의 삶의 질과 고급 쇼핑, 예술 갤러리가 조화를 이루는 곳입니다.",
+                "desc": "청정한 호수와 리마트강을 끼고 있는 스위스 최대 도시로 고급 쇼핑과 예술 갤러리가 조화를 이룹니다.",
                 "spots": ["취리히 호수 산책로", "반호프슈트라세 명품거리", "그로스뮌스터 대성당", "린덴호프 언덕 전망"],
                 "restaurants": [
-                    {"name": "Zeughauskeller", "cat": "취리히 정통식", "desc": "15세기 무기고를 개조한 곳에서 맛보는 취리히식 송아지 요리", "url": "https://www.google.com/maps/search/Zeughauskeller+Zurich"},
+                    {"name": "Zeughauskeller", "cat": "취리히 정통식", "desc": "15세기 무기고를 개조한 곳에서 맛보는 송아지 요리", "url": "https://www.google.com/maps/search/Zeughauskeller+Zurich"},
                     {"name": "Sprungli", "cat": "스위스 초콜릿 카페", "desc": "미니 마카롱 '룩셈부르겔리'와 핫초콜릿의 본산", "url": "https://www.google.com/maps/search/Sprungli+Paradeplatz+Zurich"},
                     {"name": "Rheinfelder Bierhalle", "cat": "비어가든 & 뢰스티", "desc": "푸짐한 소시지와 바삭한 뢰스티를 맥주와 즐기는 로컬 식당", "url": "https://www.google.com/maps/search/Rheinfelder+Bierhalle+Zurich"}
                 ]
             },
             "루체른 (Luzern)": {
                 "lat": 47.0502, "lon": 8.3093,
-                "desc": "꽃으로 장식된 지붕 덮인 중세 목조다리 카펠교와 백조가 노니는 호수, 필라투스산이 한 폭의 엽서 같은 그림을 완성하는 낭만 도시입니다.",
+                "desc": "꽃으로 장식된 중세 목조다리 카펠교와 백조가 노니는 호수, 필라투스산이 한 폭의 그림 같은 낭만 도시입니다.",
                 "spots": ["카펠교(유럽 최고 목조다리)", "빈사의 사자상", "필라투스/리기산 산악열차", "루체른 호수 유람선"],
                 "restaurants": [
-                    {"name": "Wirtshaus Galliker", "cat": "스위스 전통 가정식", "desc": "100년 넘는 전통을 간직한 루체른식 파이(Chugelipastete)", "url": "https://www.google.com/maps/search/Wirtshaus+Galliker+Luzern"},
+                    {"name": "Wirtshaus Galliker", "cat": "스위스 전통 가정식", "desc": "100년 넘는 전통을 간직한 루체른식 파이", "url": "https://www.google.com/maps/search/Wirtshaus+Galliker+Luzern"},
                     {"name": "Old Swiss House", "cat": "테이블 사이드 슈니첼", "desc": "손님 테이블 앞에서 버터에 직접 구워주는 명물 슈니첼", "url": "https://www.google.com/maps/search/Old+Swiss+House+Luzern"},
-                    {"name": "Bachmann", "cat": "초콜릿 베이커리", "desc": "흐르는 초콜릿 벽과 신선한 프랄린을 만나는 루체른 대표 제과점", "url": "https://www.google.com/maps/search/Confiserie+Bachmann+Luzern"}
+                    {"name": "Bachmann", "cat": "초콜릿 베이커리", "desc": "흐르는 초콜릿 벽과 신선한 프랄린을 만나는 명문 제과점", "url": "https://www.google.com/maps/search/Confiserie+Bachmann+Luzern"}
                 ]
             }
         }
     },
     "헝가리 🇭🇺": {
-        "currency": "HUF",
-        "currency_symbol": "Ft",
-        "flight_base": 1150000,
+        "currency": "HUF", "currency_symbol": "Ft", "flight_base": 1150000,
         "cities": {
             "부다페스트 (Budapest)": {
                 "lat": 47.4979, "lon": 19.0402,
-                "desc": "도나우강의 진주라 불리며, 황금빛 국회의사당 야경과 노천 세체니 온천, 앤틱한 궁전 카페에서 동유럽의 고혹적인 매력을 느낄 수 있습니다.",
+                "desc": "도나우강의 진주라 불리며, 황금빛 국회의사당 야경과 노천 세체니 온천에서 동유럽의 고혹적인 매력을 느낄 수 있습니다.",
                 "spots": ["국회의사당 야경 & 다뉴브강 크루즈", "어부의 요새 & 마차시 성당", "세체니 온천", "부다 왕궁 & 세체니 다리"],
                 "restaurants": [
                     {"name": "Menza Étterem", "cat": "굴라쉬 & 헝가리식", "desc": "레트로 모던한 감성에서 맛보는 깊고 얼큰한 소고기 굴라쉬", "url": "https://www.google.com/maps/search/Menza+Etterem+Budapest"},
-                    {"name": "Comme Chez Soi", "cat": "이탈리안 & 헝가리안", "desc": "푸아그라 요리와 해산물 파스타로 유명한 친절한 맛집", "url": "https://www.google.com/maps/search/Comme+Chez+Soi+Budapest"},
+                    {"name": "Comme Chez 소이", "cat": "이탈리안 & 헝가리안", "desc": "푸아그라 요리와 해산물 파스타로 유명한 친절한 맛집", "url": "https://www.google.com/maps/search/Comme+Chez+Soi+Budapest"},
                     {"name": "New York Café", "cat": "궁전풍 카페", "desc": "세상에서 가장 아름다운 카페로 꼽히는 화려한 궁전 카페", "url": "https://www.google.com/maps/search/New+York+Cafe+Budapest"}
                 ]
             },
             "데브레첸 (Debrecen)": {
                 "lat": 47.5316, "lon": 21.6273,
-                "desc": "헝가리 제2의 도시로, 웅장한 대형 개혁교회와 대초원 호르토바지의 야생마, 푸른 나기에르되 숲속 온천이 여유를 선사합니다.",
+                "desc": "헝가리 제2의 도시로, 웅장한 대형 개혁교회와 대초원 호르토바지의 야생마, 숲속 온천이 여유를 선사합니다.",
                 "spots": ["데브레첸 대개혁 교회", "호르토바지 국립공원 초원", "데리 박물관", "나기에르되 공원 & 온천"],
                 "restaurants": [
                     {"name": "Csokonai Restaurant", "cat": "전통 헝가리안", "desc": "데브레첸 소시지와 오리 다리 구이가 유명한 클래식 식당", "url": "https://www.google.com/maps/search/Csokonai+Restaurant+Debrecen"},
@@ -349,7 +420,7 @@ GLOBAL_DESTINATIONS = {
             },
             "세게드 (Szeged)": {
                 "lat": 46.2530, "lon": 20.1414,
-                "desc": "일조량이 가장 풍부해 '햇살의 도시'라 불리며, 파프리카의 본고장답게 얼큰한 생선 어탕 헐라슬레와 아름다운 돔 성당이 유명합니다.",
+                "desc": "일조량이 가장 풍부해 '햇살의 도시'라 불리며, 파프리카의 본고장답게 얼큰한 어탕 헐라슬레와 돔 성당이 유명합니다.",
                 "spots": ["세게드 서약 교회(둠 성당)", "시나고그(화려한 유대교 회당)", "티서 강변 산책로", "모라 페렌츠 박물관"],
                 "restaurants": [
                     {"name": "Kiskőrössy Halászcsárda", "cat": "헐라슬레(어탕)", "desc": "세게드 명물 파프리카 민물 매운탕 헐라슬레 원조 맛집", "url": "https://www.google.com/maps/search/Kiskorossy+Halaszcsarda+Szeged"},
@@ -359,6 +430,20 @@ GLOBAL_DESTINATIONS = {
             }
         }
     }
+}
+
+DOMESTIC_SPOT_DESCRIPTIONS = {
+    "강남역": "최신 트렌드와 쇼핑, 활기찬 야경과 맛집이 24시간 잠들지 않는 서울의 대표 번화가입니다.",
+    "선릉과정릉": "도심 속 푸른 숲길을 걸으며 조선 왕릉의 고즈넉한 정취와 휴식을 즐길 수 있는 유네스코 세계문화유산입니다.",
+    "경복궁": "조선 왕조 제일의 법궁으로, 웅장한 근정전과 연못 위의 경회루가 사계절 내내 아름다운 역사의 중심지입니다.",
+    "N서울타워": "남산 정상에서 360도 파노라마로 서울 전경과 낭만적인 석양, 화려한 야경을 한눈에 담을 수 있는 랜드마크입니다.",
+    "롯데월드타워": "국내 최고층 전망대 서울스카이와 아쿠아리움, 쇼핑몰이 한곳에 모인 럭셔리 복합 문화 명소입니다.",
+    "북촌한옥마을": "실제 주민들이 살아가는 조선 시대 양반 가옥 골목으로, 고풍스러운 한옥 처마와 남산 뷰가 어우러진 사진 명소입니다.",
+    "동대문디자인플라자(DDP)": "자하 하디드의 유려한 곡선 건축물로 전시, 패션쇼, 미래지향적 야경 산책을 만끽할 수 있는 디자인 성지입니다.",
+    "명동성당": "한국 천주교의 상징이자 붉은 벽돌의 웅장한 고딕 양식 건축미를 감상할 수 있는 도심 속 평화로운 성소입니다.",
+    "창덕궁": "자연 지형을 그대로 살린 한국 전통 정원의 정수 '후원(비원)'을 품은 가장 한국적인 궁궐입니다.",
+    "여의도 한강공원": "시원한 강바람을 맞으며 피크닉과 한강 라면, 자전거 라이딩과 유람선을 즐기기 가장 좋은 쉼터입니다.",
+    "국립중앙박물관": "반가사유상을 비롯한 수만 점의 국보급 유물과 아름다운 야외 거울못 정원을 무료로 둘러볼 수 있는 문화 명소입니다."
 }
 
 
@@ -401,11 +486,11 @@ def get_district_villager(address):
 
 
 # ----------------------------------------------------
-# 4. 모동숲 테마 CSS
+# 4. 모동숲 테마 CSS (메인 제목 두께 극대화)
 # ----------------------------------------------------
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&family=Gaegu:wght@400;700&display=swap');
 
     .stMarkdown, p, h1, h2, h3, h4, span:not([class*="stSlider"]), label, button {
         font-family: 'Jua', 'Gaegu', cursive, sans-serif;
@@ -454,30 +539,38 @@ st.markdown("""
         border-right: 5px solid #d5bc96 !important;
     }
 
+    /* 메인 간판: 두껍고 입체적인 모여봐요 여행의 숲 타이틀 (두께 극대화) */
     .wood-signboard {
         background: linear-gradient(180deg, #fce0a2 0%, #ebb969 100%);
-        border: 7px solid #8d5629;
-        box-shadow: 0 8px 0 #573111, 0 12px 20px rgba(0,0,0,0.15);
-        border-radius: 40px;
-        padding: 18px 30px;
+        border: 8px solid #7d441b;
+        box-shadow: 0 10px 0 #4a2507, 0 16px 24px rgba(0,0,0,0.22);
+        border-radius: 46px;
+        padding: 24px 34px;
         text-align: center;
         margin: 15px 0 25px 0;
     }
 
     .wood-title {
-        font-size: 2.3rem;
-        color: #5a320f;
-        text-shadow: 2px 2px 0px #fff4cf;
-        letter-spacing: 1px;
+        font-family: 'Black Han Sans', 'Jua', sans-serif !important;
+        font-size: 3.2rem !important;
+        font-weight: 900 !important;
+        color: #4a2507 !important;
+        -webkit-text-stroke: 2.5px #381a03;
+        text-shadow: 
+            3px 3px 0px #fff7db,
+            5px 5px 0px #c68936,
+            7px 7px 0px #573111 !important;
+        letter-spacing: 3px !important;
+        line-height: 1.2;
     }
 
     .wood-subtitle {
-        font-size: 1.15rem;
+        font-size: 1.25rem;
         color: #7a491c;
-        margin-top: 4px;
+        margin-top: 8px;
+        font-weight: bold;
     }
 
-    /* 도시 소개 카드 (신규 추가 스타일) */
     .city-intro-box {
         background: #ffffff;
         border: 4px solid #48bfe3;
@@ -504,28 +597,6 @@ st.markdown("""
         font-size: 1.12rem;
         color: #2b3a4a;
         line-height: 1.6;
-    }
-
-    .villager-banner {
-        border-radius: 20px;
-        padding: 14px 20px;
-        margin-bottom: 18px;
-        display: flex;
-        align-items: center;
-        gap: 15px;
-        border: 3px solid;
-    }
-
-    .villager-avatar {
-        font-size: 2.2rem;
-        background: #ffffff;
-        border-radius: 50%;
-        width: 54px;
-        height: 54px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 3px 6px rgba(0,0,0,0.1);
     }
 
     .detail-card {
@@ -643,6 +714,24 @@ st.markdown("""
         font-weight: bold;
     }
 
+    .passport-card {
+        background: #ffffff;
+        border: 5px solid #0096c7;
+        border-radius: 26px;
+        padding: 22px;
+        box-shadow: 0 8px 0 #0077b6;
+        margin-top: 10px;
+    }
+
+    .passport-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 3px dashed #90e0ef;
+        padding-bottom: 12px;
+        margin-bottom: 14px;
+    }
+
     .stImage img {
         border-radius: 24px !important;
         border: 5px solid #57cc99 !important;
@@ -697,6 +786,29 @@ def get_krw_rate(rates, currency):
     if not rates or currency not in rates or rates[currency] == 0:
         return None
     return 1 / rates[currency]
+
+def evaluate_exchange_timing(currency, rate):
+    if not rate:
+        return "⚪ 판정 불가", "#9e9e9e", "환율 정보가 없습니다."
+    
+    thresholds = {
+        "JPY": {"good": 900.0, "bad": 940.0, "unit": 100},
+        "USD": {"good": 1330.0, "bad": 1380.0, "unit": 1},
+        "EUR": {"good": 1460.0, "bad": 1520.0, "unit": 1},
+        "GBP": {"good": 1720.0, "bad": 1780.0, "unit": 1},
+        "CNY": {"good": 185.0, "bad": 195.0, "unit": 1},
+        "CHF": {"good": 1500.0, "bad": 1580.0, "unit": 1}
+    }
+    
+    info = thresholds.get(currency, {"good": 1000, "bad": 1200, "unit": 1})
+    val = rate * info["unit"]
+    
+    if val <= info["good"]:
+        return "🟢 환전 강력 추천 (벨 시세 매우 저렴)", "#22c55e", f"최근 평단가 대비 낮은 편입니다! 지금 필요한 경비를 미리 환전해 두세요."
+    elif val <= info["bad"]:
+        return "🟡 적정 수준 (보통)", "#eab308", "일반적인 수준의 환율입니다. 분할 환전을 권장합니다."
+    else:
+        return "🔴 환전 보류 권장 (고환율 주의)", "#ef4444", "최근 기준 환율이 높은 편입니다. 현지 카드 결제나 추이를 지켜보세요."
 
 def search_places(keyword):
     if not KAKAO_REST_API_KEY or not keyword:
@@ -760,7 +872,7 @@ def get_kakao_static_map(lat, lon, width=800, height=380):
 
 
 # ----------------------------------------------------
-# 6. 왼쪽 사이드바 (실시간 환율 & 계산기)
+# 6. 왼쪽 사이드바 (실시간 환율, 계산기 & 환율 알림 예약)
 # ----------------------------------------------------
 all_rates = fetch_all_exchange_rates()
 
@@ -815,9 +927,20 @@ with st.sidebar:
         else:
             st.warning("환율 정보를 불러올 수 없습니다.")
 
+    with st.expander("🔔 원하는 환율 이메일 알림 신청"):
+        st.caption("설정한 목표 환율에 도달하면 너굴 알림을 보내드립니다.")
+        notify_currency = st.selectbox("알림 받을 통화", ["USD", "JPY", "EUR", "GBP", "CNY"])
+        target_price = st.number_input("희망 목표 환율 (원)", min_value=1.0, value=900.0 if notify_currency=="JPY" else 1350.0, step=5.0)
+        user_email = st.text_input("알림 수신 이메일 주소", placeholder="example@email.com")
+        if st.button("벨 시세 알림 예약하기", use_container_width=True):
+            if "@" in user_email and "." in user_email:
+                st.success(f"'{user_email}'로 {notify_currency}가 {target_price:,.1f}원 도달 시 알림이 예약되었습니다!")
+            else:
+                st.error("올바른 이메일 형식을 입력해주세요.")
+
 
 # ----------------------------------------------------
-# 7. 상단 헤더 배너
+# 7. 상단 헤더 배너 (두꺼운 제목 극대화)
 # ----------------------------------------------------
 banner_path = "image/dongsoop.jpg"
 if os.path.exists(banner_path):
@@ -825,8 +948,8 @@ if os.path.exists(banner_path):
 
 st.markdown("""
 <div class="wood-signboard">
-    <div class="wood-title">🍃 모여봐요 여행의 숲 (국내 & 해외) 🏝️</div>
-    <div class="wood-subtitle">너굴 안내소에서 국내 명소부터 전 세계 도시 일정·예산까지 한 번에!</div>
+    <div class="wood-title">🍃 모여봐요 여행의 숲 🏝️</div>
+    <div class="wood-subtitle">동물 주민들과 함께 떠나는 목적지 탐험, 나만의 일정 편집 & 예산 가이드</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -855,7 +978,6 @@ if travel_mode == "🇰🇷 국내 여행지 탐색":
     ]
     quick_pick = st.selectbox("서울 인기 명소 빠른 선택:", seoul_hotspots, index=0)
 
-    # 국내 명소 한 줄 소개 박스 표시
     if quick_pick != "선택 안 함" and quick_pick in DOMESTIC_SPOT_DESCRIPTIONS:
         st.markdown(f"""
         <div class="city-intro-box">
@@ -1013,7 +1135,7 @@ else:
     currency_code = country_info["currency"]
     currency_sym = country_info["currency_symbol"]
 
-    # 1. 해외 도시 소개 카드 (신규 추가된 부분)
+    # 도시 소개 카드
     st.markdown(f"""
     <div class="city-intro-box">
         <div class="city-intro-badge">🌍 {selected_city} 매력 탐구</div>
@@ -1021,8 +1143,8 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    # 2. 해외 도시 날씨 & 환율 요약
-    st.markdown(f"### ⛅ **{selected_city}** 현지 날씨 및 환율 정보")
+    # 1. 해외 도시 날씨 & 환율 신호등
+    st.markdown(f"### ⛅ **{selected_city}** 현지 날씨 & 환율 진단")
 
     col_g_weather, col_g_exchange = st.columns([1, 1])
 
@@ -1059,6 +1181,7 @@ else:
 
     with col_g_exchange:
         curr_rate = get_krw_rate(all_rates, currency_code)
+        timing_status, timing_color, timing_tip = evaluate_exchange_timing(currency_code, curr_rate)
         
         if curr_rate:
             if currency_code == "JPY":
@@ -1074,21 +1197,24 @@ else:
 
         st.markdown(f"""
         <div class="detail-card">
-            <div class="place-main-title">💱 {selected_country} 환율 안내</div>
-            <div class="place-badge">통화 코드: {currency_code} ({currency_sym})</div>
+            <div class="place-main-title">💱 {selected_country} 환율 및 타이밍</div>
+            <div class="place-badge">통화: {currency_code} ({currency_sym})</div>
             <div class="info-line">
                 <div class="exchange-highlight-box">
-                    <span class="exchange-big-val">💰 현재 환율: {rate_text}</span>
-                    <span style="color:#4b5563; font-size:0.92rem;">
-                        ※ 사이드바의 환율 계산기에서 원하는 금액을 직접 변환할 수 있습니다.
-                    </span>
+                    <span class="exchange-big-val">💰 실시간: {rate_text}</span>
+                    <div style="margin-top:6px; font-weight:bold; color:{timing_color}; font-size:1.08rem;">
+                        {timing_status}
+                    </div>
+                    <div style="font-size:0.9rem; color:#444; margin-top:2px;">
+                        {timing_tip}
+                    </div>
                 </div>
                 🧭 <b>도시 중심 좌표:</b> 위도 {city_info['lat']:.4f}, 경도 {city_info['lon']:.4f}
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # 3. 필수 주요 관광지 & 대표 로컬 맛집 3곳
+    # 2. 필수 주요 명소 & 대표 맛집
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(f"### 🏛️ {selected_city}에서 꼭 가봐야 할 주요 명소")
     spot_cols = st.columns(len(city_info["spots"]))
@@ -1121,9 +1247,9 @@ else:
             </div>
             """, unsafe_allow_html=True)
 
-    # 4. 일정표 자동 생성 및 1/N 고정비 분할 예산 계산기
+    # 3. 여행 조건 및 예산 계산기
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f"### 🗓️ {selected_city} 여행 일정표 및 예산 계산기")
+    st.markdown(f"### 🗓️ {selected_city} 여행 조건 & 1/N 예산 계산")
 
     col_plan_input, col_budget_view = st.columns([1, 1])
 
@@ -1132,7 +1258,7 @@ else:
         days_option = st.selectbox(
             "몇박 며칠 일정인가요?",
             ["2박 3일", "3박 4일", "4박 5일", "5박 6일", "6박 7일"],
-            index=1
+            index=2
         )
         people_count = st.number_input("여행 인원수 (명)", min_value=1, max_value=20, value=2, step=1)
         
@@ -1179,7 +1305,7 @@ else:
         foreign_total = total_cost / (curr_rate or 1.0)
 
     with col_budget_view:
-        st.markdown("#### 💰 1/N 고정비 분할 예상 경비 산출")
+        st.markdown("#### 💰 1/N 고정비 분할 예상 경비")
 
         st.markdown(f"""
         <div class="weather-card" style="border-color:#57cc99; box-shadow:0 6px 0 #38a3a5;">
@@ -1201,20 +1327,20 @@ else:
                 (현지 통화 약 {foreign_total:,.0f} {currency_sym})
             </span>
             <div class="outfit-box" style="margin-top:12px; font-size:0.86rem; line-height:1.6;">
-                💡 <b>예산 분할 안내:</b><br>
-                총 숙소비(₩{total_lodging_cost:,.0f})와 공동 교통비(₩{total_shared_transport:,.0f})를 {people_count}명이 1/N으로 나누어 부담하므로 인원수가 많아질수록 1인당 고정비 부담이 절감됩니다.
+                💡 <b>예산 분할 안내:</b> 숙소비와 공용 렌트/교통비를 {people_count}명이 나누어 부담하므로 인원수가 많아질수록 1인당 고정비가 절감됩니다.
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # 5. 일차별 추천 일정표 생성
+    # 4. 여행 일정표 (직접 추가/삭제/수정 가능한 data_editor)
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f"#### 📋 {selected_city} {days_option} 맞춤 추천 일정표")
+    st.markdown(f"### 📋 {selected_city} {days_option} 일정표 편집기 (직접 수정/추가 가능)")
+    st.caption("💡 표 안의 내용을 더블클릭해서 직접 수정하거나, 맨 아래 빈 행에 새로운 일정을 추가(+) 또는 삭제할 수 있습니다.")
 
     spots = city_info["spots"]
     rests = city_info["restaurants"]
 
-    schedule_data = []
+    initial_schedule = []
     for day in range(1, num_days + 1):
         if day == 1:
             plan = f"공항 도착 및 숙소 체크인 ➡️ {spots[0]} 산책 및 구경 ➡️ 저녁 식사 ({rests[0]['name']})"
@@ -1225,11 +1351,129 @@ else:
             rest_idx = (day) % len(rests)
             plan = f"오전 투어 ({spots[spot_idx]}) ➡️ 점심 식사 ➡️ 오후 투어 ({spots[(spot_idx + 1) % len(spots)]}) ➡️ {rests[rest_idx]['name']} 디너 & 야경 투어"
 
-        schedule_data.append({"일차": f"Day {day}", "상세 추천 코스 및 활동": plan})
+        initial_schedule.append({"일차": f"Day {day}", "상세 추천 코스 및 활동": plan})
 
-    st.table(schedule_data)
+    df_schedule = pd.DataFrame(initial_schedule)
 
-    # 6. 도시 위치 지도 출력
+    edited_df = st.data_editor(
+        df_schedule,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "일차": st.column_config.TextColumn("일차 (Day)", width="small", required=True),
+            "상세 추천 코스 및 활동": st.column_config.TextColumn("상세 추천 코스 및 활동", width="large", required=True)
+        },
+        key=f"editor_{selected_city}_{days_option}"
+    )
+
+    # 완성된 일정표 & 예산 내보내기
+    st.markdown("#### 📤 완성된 일정표 & 예산 내보내기")
+    
+    export_lines = []
+    export_lines.append(f"==========================================")
+    export_lines.append(f"🏝️ [모여봐요 여행의 숲] {selected_city} 여행 플랜")
+    export_lines.append(f"==========================================")
+    export_lines.append(f"📍 목적지: {selected_country} - {selected_city}")
+    export_lines.append(f"🗓️ 여행 일정: {days_option} / 인원: {people_count}명")
+    export_lines.append(f"✨ 여행 스타일: {travel_style}")
+    export_lines.append(f"💰 1인당 예상 경비: 약 {cost_per_person:,.0f}원 ({foreign_per_person:,.0f} {currency_sym})")
+    export_lines.append(f"💰 총 여행 경비: 약 {total_cost:,.0f}원 ({foreign_total:,.0f} {currency_sym})")
+    export_lines.append(f"------------------------------------------")
+    export_lines.append(f"[상세 여행 일정표]")
+    for _, row in edited_df.iterrows():
+        export_lines.append(f"• {row['일차']}: {row['상세 추천 코스 및 활동']}")
+    export_lines.append(f"------------------------------------------")
+    export_lines.append(f"행복하고 안전한 무인도 여행 되세요! 🍃")
+    export_text = "\n".join(export_lines)
+
+    col_down, col_copy = st.columns([1, 2])
+    with col_down:
+        st.download_button(
+            label="💾 일정표 텍스트(.txt) 다운로드",
+            data=export_text,
+            file_name=f"{selected_city}_여행일정표.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+    with col_copy:
+        with st.expander("📋 카카오톡 공유용 텍스트 전체보기"):
+            st.text_area("복사해서 단톡방에 공유하세요", export_text, height=200)
+
+    # ----------------------------------------------------
+    # 5. 짐 싸기 DIY 체크리스트
+    # ----------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### 🧳 무인도 이주 짐 싸기 DIY 체크리스트")
+    st.caption("선택한 도시 여행에 꼭 필요한 의류, 세면도구, 전자기기 및 서류를 꼼꼼히 챙겨보세요!")
+
+    for cat_name, items in st.session_state.categorized_checklist.items():
+        with st.expander(f"{cat_name} ({sum(1 for i in items if i['checked'])}/{len(items)} 완료)", expanded=True):
+            cat_cols = st.columns(2)
+            for idx, c_item in enumerate(items):
+                with cat_cols[idx % 2]:
+                    checked = st.checkbox(c_item["item"], value=c_item["checked"], key=f"chk_{cat_name}_{idx}")
+                    c_item["checked"] = checked
+
+    st.markdown("##### ➕ 나만의 준비물 추가하기")
+    c_add_cat, c_add_txt, c_add_btn = st.columns([2, 4, 1])
+    with c_add_cat:
+        target_cat = st.selectbox("추가할 카테고리", list(st.session_state.categorized_checklist.keys()), label_visibility="collapsed")
+    with c_add_txt:
+        new_item = st.text_input("준비물 내용 입력", placeholder="예: 미니 고데기, 카메라 충전기, 비상 핫팩...", label_visibility="collapsed")
+    with c_add_btn:
+        if st.button("추가", use_container_width=True):
+            if new_item.strip():
+                st.session_state.categorized_checklist[target_cat].append({"item": new_item.strip(), "checked": False})
+                st.rerun()
+
+    # ----------------------------------------------------
+    # 6. 도도항공 탑승권 & 여권 발권 (이미지 다운로드 기능 탑재)
+    # ----------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### 🎫 나만의 모동숲 도도항공 탑승권 & 여권 발권")
+
+    p_col1, p_col2 = st.columns([1, 1])
+    with p_col1:
+        pass_name = st.text_input("여행자 이름(섬 주민 닉네임)", value="너굴주민")
+        pass_motto = st.text_input("여권 한 줄 다짐", value="맛있는 거 많이 먹고 푹 쉬다 오기!")
+
+        boarding_pass_bytes = generate_boarding_pass_image(
+            passenger=pass_name,
+            from_dest="INCHEON (ICN)",
+            to_dest=selected_city.upper(),
+            duration=f"{days_option} ({people_count}인)",
+            motto=pass_motto
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.download_button(
+            label="📸 도도항공 탑승권 이미지(.png) 다운로드",
+            data=boarding_pass_bytes,
+            file_name=f"DODO_AIRLINES_{selected_city}_{pass_name}.png",
+            mime="image/png",
+            use_container_width=True
+        )
+
+    with p_col2:
+        st.markdown(f"""
+        <div class="passport-card">
+            <div class="passport-header">
+                <div>
+                    <span style="font-size:1.3rem; font-weight:bold; color:#0077b6;">🦤 DODO AIRLINES BOARDING PASS</span><br>
+                    <span style="font-size:0.85rem; color:#666;">DAL-2026-ISLAND</span>
+                </div>
+                <div style="font-size:1.6rem;">✈️</div>
+            </div>
+            <div style="line-height:1.8; color:#333; font-size:1rem;">
+                👤 <b>PASSENGER:</b> {pass_name}<br>
+                🛫 <b>FROM:</b> INCHEON (ICN) ➡️ <b>TO:</b> {selected_city.upper()}<br>
+                🗓️ <b>DURATION:</b> {days_option} ({people_count}명)<br>
+                💬 <b>MOTTO:</b> "{pass_motto}"
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 7. 도시 위치 지도
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(f"#### 🗺️ **{selected_city}** 글로벌 지도")
     st.map([{"lat": city_info["lat"], "lon": city_info["lon"]}], zoom=12, use_container_width=True)
