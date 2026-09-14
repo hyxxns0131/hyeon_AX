@@ -404,7 +404,7 @@ GLOBAL_DESTINATIONS = {
                 "spots": ["국회의사당 야경 & 다뉴브강 크루즈", "어부의 요새 & 마차시 성당", "세체니 온천", "부다 왕궁 & 세체니 다리"],
                 "restaurants": [
                     {"name": "Menza Étterem", "cat": "굴라쉬 & 헝가리식", "desc": "레트로 모던한 감성에서 맛보는 깊고 얼큰한 소고기 굴라쉬", "url": "https://www.google.com/maps/search/Menza+Etterem+Budapest"},
-                    {"name": "Comme Chez 소이", "cat": "이탈리안 & 헝가리안", "desc": "푸아그라 요리와 해산물 파스타로 유명한 친절한 맛집", "url": "https://www.google.com/maps/search/Comme+Chez+Soi+Budapest"},
+                    {"name": "Comme Chez Soi", "cat": "이탈리안 & 헝가리안", "desc": "푸아그라 요리와 해산물 파스타로 유명한 친절한 맛집", "url": "https://www.google.com/maps/search/Comme+Chez+Soi+Budapest"},
                     {"name": "New York Café", "cat": "궁전풍 카페", "desc": "세상에서 가장 아름다운 카페로 꼽히는 화려한 궁전 카페", "url": "https://www.google.com/maps/search/New+York+Cafe+Budapest"}
                 ]
             },
@@ -486,11 +486,11 @@ def get_district_villager(address):
 
 
 # ----------------------------------------------------
-# 4. 모동숲 테마 CSS (메인 제목 두께 극대화)
+# 4. 모동숲 테마 CSS (메인 제목 두께 최적화)
 # ----------------------------------------------------
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&family=Gaegu:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@400;700&display=swap');
 
     .stMarkdown, p, h1, h2, h3, h4, span:not([class*="stSlider"]), label, button {
         font-family: 'Jua', 'Gaegu', cursive, sans-serif;
@@ -539,35 +539,36 @@ st.markdown("""
         border-right: 5px solid #d5bc96 !important;
     }
 
-    /* 메인 간판: 두껍고 입체적인 모여봐요 여행의 숲 타이틀 (두께 극대화) */
+    /* 메인 간판: 도톰하고 둥글둥글한 동숲 감성 제목 복원 */
     .wood-signboard {
         background: linear-gradient(180deg, #fce0a2 0%, #ebb969 100%);
-        border: 8px solid #7d441b;
-        box-shadow: 0 10px 0 #4a2507, 0 16px 24px rgba(0,0,0,0.22);
-        border-radius: 46px;
-        padding: 24px 34px;
+        border: 7px solid #8d5629;
+        box-shadow: 0 9px 0 #573111, 0 14px 22px rgba(0,0,0,0.18);
+        border-radius: 42px;
+        padding: 20px 32px;
         text-align: center;
         margin: 15px 0 25px 0;
     }
 
     .wood-title {
-        font-family: 'Black Han Sans', 'Jua', sans-serif !important;
-        font-size: 3.2rem !important;
-        font-weight: 900 !important;
-        color: #4a2507 !important;
-        -webkit-text-stroke: 2.5px #381a03;
+        font-family: 'Jua', cursive, sans-serif !important;
+        font-size: 2.75rem !important;
+        color: #4a2810 !important;
         text-shadow: 
-            3px 3px 0px #fff7db,
-            5px 5px 0px #c68936,
-            7px 7px 0px #573111 !important;
-        letter-spacing: 3px !important;
-        line-height: 1.2;
+            -1.5px -1.5px 0 #fff8e7,
+             1.5px -1.5px 0 #fff8e7,
+            -1.5px  1.5px 0 #fff8e7,
+             1.5px  1.5px 0 #fff8e7,
+             3px 4px 0px #b07d48,
+             4px 5px 0px #6d411b !important;
+        letter-spacing: 1.5px !important;
+        line-height: 1.25;
     }
 
     .wood-subtitle {
-        font-size: 1.25rem;
+        font-size: 1.2rem;
         color: #7a491c;
-        margin-top: 8px;
+        margin-top: 6px;
         font-weight: bold;
     }
 
@@ -1400,7 +1401,7 @@ else:
             st.text_area("복사해서 단톡방에 공유하세요", export_text, height=200)
 
     # ----------------------------------------------------
-    # 5. 짐 싸기 DIY 체크리스트
+    # 5. 짐 싸기 DIY 체크리스트 (옷, 세면도구, 서류 등 전면 확충)
     # ----------------------------------------------------
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### 🧳 무인도 이주 짐 싸기 DIY 체크리스트")
