@@ -1,0 +1,31 @@
+[theme]
+# 버튼, 링크, 슬라이더 등 강조 색상 (신뢰감을 주는 딥블루)
+primaryColor = "#0B2B5C"
+
+# 기본 본문 배경색
+backgroundColor = "#FFFFFF"
+
+# 사이드바 및 보조 위젯 배경색 (연한 그레이 톤)
+secondaryBackgroundColor = "#F8F9FA"
+
+# 기본 본문 텍스트 색상
+textColor = "#212529"
+
+# 기본 글꼴 (sans serif / serif / monospace 중 선택)
+font = "sans serif"
+
+[client]
+# 화면 하단의 Streamlit 기본 워터마크/푸터 숨기기
+showSidebarNavigation = true
+
+[server]
+# 실행 포트 설정 (기본값: 8501)
+port = 8501
+
+# 외부 접속 보안 옵션
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# 앱 실행 시 브라우저 자동 실행 여부
+gatherUsageStats = false
